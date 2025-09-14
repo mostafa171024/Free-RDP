@@ -1,0 +1,54 @@
+name: RDP
+on:
+  workflow_dispatch:
+
+jobs:
+  secure-rdp:
+    runs-on: windows-latest
+    timeout-minutes: 360
+    steps:
+      - name: Configure RDP
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\' -Name "fDenyTSConnections" -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          Restart-Service -Name TermService -Force
+
+      - name: Create RDP User
+        run: |
+          $password = "admin@123"
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+          if (-not (Get-LocalUser -Name "TOOLBOXLAP" -ErrorAction SilentlyContinue)) {
+            New-LocalUser -Name "TOOLBOXLAP" -Password $securePass
+          }
+          Add-LocalGroupMember -Group "Administrators" -Member "TOOLBOXLAP"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "TOOLBOXLAP"
+
+      - name: Install OpenVPN
+        run: |
+          Invoke-WebRequest -Uri "https://swupdate.openvpn.org/community/releases/OpenVPN-2.5.9-I601-amd64.msi" -OutFile openvpn.msi
+          Start-Process msiexec.exe -Wait -ArgumentList '/i openvpn.msi /qn'
+
+      - name: Configure OpenVPN
+        run: |
+          $ovpn = "${{ secrets.OVPN_CONFIG }}"
+          Set-Content -Path "C:\Program Files\OpenVPN\config\italy.ovpn" -Value $ovpn
+          if ("${{ secrets.OVPN_USER }}" -ne "") {
+            echo "${{ secrets.OVPN_USER }}" | Out-File "C:\Program Files\OpenVPN\config\auth.txt"
+            echo "${{ secrets.OVPN_PASS }}" | Out-File -Append "C:\Program Files\OpenVPN\config\auth.txt"
+          }
+
+      - name: Connect to Italy VPN
+        run: |
+          $args = "--config 'C:\Program Files\OpenVPN\config\italy.ovpn'"
+          if (Test-Path "C:\Program Files\OpenVPN\config\auth.txt") {
+            $args += " --auth-user-pass 'C:\Program Files\OpenVPN\config\auth.txt'"
+          }
+          Start-Process "C:\Program Files\OpenVPN\bin\openvpn.exe" -ArgumentList $args -WindowStyle Hidden
+
+      - name: Show RDP Info
+        run: |
+          Write-Host "===================================="
+          Write-Host "✅ RDP Ready via Italy VPN!"
+          Write-Host "Username: TOOLBOXLAP"
+          Write-Host "Password: admin@123"
+          Write-Host "===================================="
